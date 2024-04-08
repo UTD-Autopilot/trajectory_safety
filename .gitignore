@@ -1,0 +1,7 @@
+__pycache__/
+venv/
+saves/
+runs/
+plots/
+
+debug.png
