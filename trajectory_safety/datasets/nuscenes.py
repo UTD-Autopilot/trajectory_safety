@@ -5,6 +5,7 @@ import torchvision
 import torch
 import numpy as np
 from torchvision import transforms
+from torch.utils.data import Dataset
 
 from nuscenes.eval.common.utils import quaternion_yaw
 from nuscenes.map_expansion.map_api import NuScenesMap
@@ -22,8 +23,9 @@ from .utils import rotate_points
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 
 
-class NuScenesTrajectoryPredictionDataset(torch.utils.data.Dataset):
+class NuScenesTrajectoryPredictionDataset(Dataset):
     def __init__(self, dataset_path, split='train'):
+        super().__init__()
         # split must be one of ['mini_train', 'mini_val', 'train', 'train_val', 'val']
 
         self.dataset_path = dataset_path
@@ -32,7 +34,7 @@ class NuScenesTrajectoryPredictionDataset(torch.utils.data.Dataset):
         else:
             self.nusc = NuScenes('v1.0-trainval', dataroot=self.dataset_path, verbose=False)
         self.helper = PredictHelper(self.nusc)
-        self.sample_ids = get_prediction_challenge_split("mini_train", dataroot=self.dataset_path)
+        self.sample_ids = get_prediction_challenge_split(split, dataroot=self.dataset_path)
 
         static_layer_rasterizer = StaticLayerRasterizer(self.helper)
         agent_rasterizer = AgentBoxesWithFadedHistory(self.helper, seconds_of_history=1)
@@ -59,5 +61,6 @@ class NuScenesTrajectoryPredictionDataset(torch.utils.data.Dataset):
         if self.transform is not None:
             img = self.transform(img)
 
+        img = torch.flip(img, [-1]) # flip x to fix handedness
         future_xy_local = rotate_points(future_xy_local, -90)
         return img, agent_state_vector, future_xy_local

@@ -1,6 +1,8 @@
 __pycache__/
-venv/
-saves/
-runs/
-plots/
-tmp/
+/data/
+/data
+/venv/
+/saves/
+/runs/
+/plots/
+/tmp/

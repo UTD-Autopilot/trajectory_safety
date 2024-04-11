@@ -1,0 +1,8 @@
+torch
+torchaudio
+torchvision
+matplotlib
+tensorboard
+opencv-python
+nuscenes-devkit
+torchdatasets

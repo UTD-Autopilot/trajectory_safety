@@ -14,7 +14,7 @@ from trajectory_safety.models.covernet.covernet import CoverNet
 from trajectory_safety.loss.constant_lattice import ConstantLatticeLoss
 
 
-def visualize_trajectory(dataset='carla'):
+def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4'):
     device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
 
     image_size_x = 224
@@ -22,13 +22,15 @@ def visualize_trajectory(dataset='carla'):
     bev_range = 50.0
 
     if dataset == 'nuscenes':
-        train_loader, test_loader = get_dataloader_nuscenes()
+        train_loader, test_loader = get_dataloader_nuscenes(batch_size=1)
+    elif dataset == 'nuscenes_mini':
+        train_loader, test_loader = get_dataloader_nuscenes(split='mini', batch_size=1)
     elif dataset == 'carla':
-        train_loader, test_loader = get_dataloader_carla()
+        train_loader, test_loader = get_dataloader_carla(batch_size=1)
     else:
         raise NotImplementedError(f'Dataset {dataset} not supported.')
     
-    with open('trajectory_safety/models/covernet/lattice/epsilon_2.pkl', 'rb') as f:
+    with open(f'trajectory_safety/models/covernet/lattice/{lattice_set}.pkl', 'rb') as f:
         lattice = pickle.load(f)
         # In our data the vehicle is heading to the x axis, but the lattice is assuming the vehicle
         # is heading toward y axis, so we need to rotate these -90 degrees.
@@ -41,7 +43,7 @@ def visualize_trajectory(dataset='carla'):
     model = torch.nn.DataParallel(model)
     model.to(device)
 
-    save_dir = f'saves/{dataset}/resnet50_epsilon_2/'
+    save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
     latest_model_timestamp = None
     latest_model_path = None
     for filename in os.listdir(save_dir):
@@ -73,23 +75,39 @@ def visualize_trajectory(dataset='carla'):
 
         plt.imshow(np.moveaxis(image[0].cpu().numpy(), 0, 2))
 
-        for trajectory in pred_trajectories[0]:
-            # Transform the trejectory to image space for plotting
-            trajectory_x = trajectory[1] * (image_size_x/(bev_range*2)) + (image_size_x/2)
-            trajectory_y = (-trajectory[0]) * (image_size_y/(bev_range*2)) + (image_size_y/2)
-            ax.scatter(trajectory_x, trajectory_y, color='blue') 
-        
         # print('pred_trajectories', pred_trajectories.shape)
         # print('gt_trajectory', gt_trajectory.shape)
         for trajectory in gt_trajectory[0]:
             # Transform the trejectory to image space for plotting
             trajectory_x = trajectory[1] * (image_size_x/(bev_range*2)) + (image_size_x/2)
             trajectory_y = (-trajectory[0]) * (image_size_y/(bev_range*2)) + (image_size_y/2)
+            if dataset in ['nuscenes', 'nuscenes_mini']:
+                trajectory_y += 62.5 # nuscenes agent vehicle is not in the center
             ax.scatter(trajectory_x, trajectory_y, color='red')
+
+        for trajectory in pred_trajectories[0]:
+            # Transform the trejectory to image space for plotting
+            trajectory_x = trajectory[1] * (image_size_x/(bev_range*2)) + (image_size_x/2)
+            trajectory_y = (-trajectory[0]) * (image_size_y/(bev_range*2)) + (image_size_y/2)
+            if dataset in ['nuscenes', 'nuscenes_mini']:
+                trajectory_y += 62.5
+            ax.scatter(trajectory_x, trajectory_y, color='blue') 
         
         os.makedirs(f'plots/{dataset}', exist_ok=True)
         plt.savefig(f'plots/{dataset}/{i}.png')
         plt.close()
 
 if __name__ == "__main__":
-    visualize_trajectory()
+    parser = argparse.ArgumentParser(
+        description='Covernet trajectory visualization'
+    )
+
+    parser.add_argument('-d', '--dataset', type=str, choices=['nuscenes', 'nuscenes_mini', 'carla'])
+    parser.add_argument('-g', '--gpus', type=int, nargs='+', default=[0])
+    parser.add_argument('-v', '--verbose', action='store_true')
+
+    args = parser.parse_args()
+
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(x) for x in args.gpus])
+
+    visualize_trajectory(dataset=args.dataset)

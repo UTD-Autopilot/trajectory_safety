@@ -17,11 +17,13 @@ from trajectory_safety.loss.constant_lattice import ConstantLatticeLoss
 
 
 
-def train_model(dataset='carla'):
+def train_model(dataset='carla', lattice_set='epsilon_4'):
     device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
 
     if dataset == 'nuscenes':
         train_loader, test_loader = get_dataloader_nuscenes()
+    elif dataset == 'nuscenes_mini':
+        train_loader, test_loader = get_dataloader_nuscenes(split='mini')
     elif dataset == 'carla':
         train_loader, test_loader = get_dataloader_carla()
     else:
@@ -29,13 +31,24 @@ def train_model(dataset='carla'):
 
     backbone = ResNetBackbone('resnet50')
 
-    with open('trajectory_safety/models/covernet/lattice/epsilon_2.pkl', 'rb') as f:
+    with open(f'trajectory_safety/models/covernet/lattice/{lattice_set}.pkl', 'rb') as f:
         lattice = pickle.load(f)
         # In our data the vehicle is heading to the x axis, but the lattice is assuming the vehicle
         # is heading toward y axis, so we need to rotate these -90 degrees.
         lattice = rotate_points(np.array(lattice), -90)
 
     print('len(lattice):', len(lattice))
+    # print(lattice.shape)
+    # plt.clf()
+    # for l in lattice:
+    #     plt.plot(l[:, 0], l[:, 1])
+    # plt.savefig('tmp/lattice.png')
+    # plt.clf()
+    # for i, data in enumerate(train_loader):
+    #     img, state_vector, y = data
+    #     for t in y:
+    #         plt.plot(t[:, 0], t[:, 1])
+    # plt.savefig('tmp/trajectory.png')
 
     # Note that the value of num_modes depends on the size of the lattice used for CoverNet.
     lattice = np.array(lattice)
@@ -45,17 +58,21 @@ def train_model(dataset='carla'):
 
     criterion = ConstantLatticeLoss(lattice=lattice)
     #optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=0)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=0)
+    #optimizer = torch.optim.RMSprop(model.parameters(), lr=0.1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-    save_dir = f'saves/{dataset}/resnet50_epsilon_2/'
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=10, min_lr=1e-5)
+
+    save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
     os.makedirs(save_dir, exist_ok=True)
 
-    writer = SummaryWriter(log_dir=f'./runs/{dataset}/resnet50_epsilon_2/')
+    writer = SummaryWriter(log_dir=f'./runs/{dataset}/resnet50_{lattice_set}/')
 
     # Training loop
-    num_epochs = 30
-    model.train()
+    num_epochs = 1000
     for epoch in range(0, num_epochs):
+        model.train()
         train_loss = 0.0
         train_acc = 0.0
         for i, data in enumerate(train_loader):
@@ -65,13 +82,12 @@ def train_model(dataset='carla'):
             state_vector = state_vector.to(device)
             trajectory = trajectory.to(device)
             optimizer.zero_grad()
-            # print('image', image.shape)
-            # print('image max', torch.max(image))
-            # print('state_vector', state_vector)
+
             logits = model(image, state_vector)
-            # print('logits', logits[0])
-            # print('logits max', torch.max(logits))
-            # print('trajectory', trajectory[0])
+
+            # print(f'image min max: {image.min()} {image.max()}')
+            # print(f'state_vector min max: {state_vector.min()} {state_vector.max()}')
+            # print(f'logits min max: {logits.min()} {logits.max()}')
 
             loss, acc = criterion(logits, trajectory)
             # print('loss', loss)
@@ -85,7 +101,11 @@ def train_model(dataset='carla'):
         train_acc = train_acc / len(train_loader)
         writer.add_scalar('train_loss', train_loss, epoch)
         writer.add_scalar('train_acc', train_acc, epoch)
-        print(f'Epoch {epoch} training loss: {train_loss} acc: {train_acc}')
+        lr = optimizer.param_groups[0]["lr"]
+        writer.add_scalar('lr', lr, epoch)
+        print(f'Epoch {epoch} training loss: {train_loss} acc: {train_acc} lr: {lr}')
+
+        scheduler.step(train_loss)
 
         with torch.no_grad():
             test_loss = 0.0
@@ -116,7 +136,7 @@ def main():
         description='Covernet trainer'
     )
 
-    parser.add_argument('-d', '--dataset', type=str, choices=['nuscenes', 'carla'])
+    parser.add_argument('-d', '--dataset', type=str, choices=['nuscenes', 'nuscenes_mini', 'carla'])
     parser.add_argument('-g', '--gpus', type=int, nargs='+', default=[0])
     parser.add_argument('-v', '--verbose', action='store_true')
 
