@@ -10,7 +10,7 @@ import cv2
 from .utils import rotate_points
 
 class CarlaTrajectoryPredictionDataset(Dataset):
-    def __init__(self, dataset_paths, return_metadata=False, sensor_range=100.0, bev_range=100.0):
+    def __init__(self, dataset_paths, return_metadata=False, sensor_range=50.0, bev_range=50.0):
         super().__init__()
         self.records = []
         self.return_metadata = return_metadata

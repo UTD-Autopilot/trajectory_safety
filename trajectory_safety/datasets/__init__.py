@@ -5,7 +5,7 @@ from trajectory_safety.datasets.carla import CarlaTrajectoryPredictionDataset
 from trajectory_safety.datasets.nuscenes import NuScenesTrajectoryPredictionDataset
 from torch.utils.data import Dataset, DataLoader, random_split
 
-def get_dataloader_carla(records_folder='/home/txw190000/data/Workspace/data/carla'):
+def get_dataloader_carla(records_folder='/home/txw190000/data/Workspace/data/carla', batch_size=64):
     train_records_folder = os.path.join(records_folder, "train")
     test_records_folder = os.path.join(records_folder, "test")
 
@@ -29,25 +29,20 @@ def get_dataloader_carla(records_folder='/home/txw190000/data/Workspace/data/car
     train_dataset = CarlaTrajectoryPredictionDataset(train_dataset_paths)
     test_dataset = CarlaTrajectoryPredictionDataset(test_dataset_paths)
 
-    print(len(train_dataset))
-    img, state_vector, y = train_dataset[1840]
-    #plt.imshow(np.array(img).transpose(1, 2, 0))
-    print(y)
-
     train_size = len(train_dataset)
     test_size = len(test_dataset)
     print("Training&testing dataset size:", train_size, test_size)
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=0,
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=0,
     )
@@ -55,16 +50,16 @@ def get_dataloader_carla(records_folder='/home/txw190000/data/Workspace/data/car
     return train_loader, test_loader
 
 
-def get_dataloader_nuscenes():
-    nuscenes_path = '../data/nuscenes/mini'
-    train_dataset = NuScenesTrajectoryPredictionDataset(nuscenes_path, 'mini_train')
-    test_dataset = NuScenesTrajectoryPredictionDataset(nuscenes_path, 'mini_val')
+def get_dataloader_nuscenes(dataset_path='../data/nuscenes/trainval', split='trainval', batch_size=64):
 
-    print(len(train_dataset))
-    img, state_vector, y = train_dataset[0]
-    plt.imshow(np.array(img).transpose(1, 2, 0))
-    plt.savefig('debug.png')
-    print(y)
+    if split == 'trainval':
+        train_dataset = NuScenesTrajectoryPredictionDataset(dataset_path, 'train')
+        test_dataset = NuScenesTrajectoryPredictionDataset(dataset_path, 'val')
+    elif split == 'mini':
+        train_dataset = NuScenesTrajectoryPredictionDataset(dataset_path, 'mini_train')
+        test_dataset = NuScenesTrajectoryPredictionDataset(dataset_path, 'mini_val')
+    else:
+        raise ValueError('Split must be mini or trainval.')
 
     train_size = len(train_dataset)
     test_size = len(test_dataset)
@@ -72,14 +67,14 @@ def get_dataloader_nuscenes():
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=True,
         num_workers=0,
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=64,
+        batch_size=batch_size,
         shuffle=False,
         num_workers=0,
     )

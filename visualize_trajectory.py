@@ -17,8 +17,8 @@ from trajectory_safety.loss.constant_lattice import ConstantLatticeLoss
 def visualize_trajectory(dataset='carla'):
     device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
 
-    image_size_x = 500
-    image_size_y = 500
+    image_size_x = 224
+    image_size_y = 224
     bev_range = 50.0
 
     if dataset == 'nuscenes':
@@ -71,17 +71,21 @@ def visualize_trajectory(dataset='carla'):
             predictions = predictions.detach().cpu().numpy()[0]
         pred_trajectories = lattice[predictions]
 
-        for trajectory in pred_trajectories:
+        plt.imshow(np.moveaxis(image[0].cpu().numpy(), 0, 2))
+
+        for trajectory in pred_trajectories[0]:
             # Transform the trejectory to image space for plotting
-            trajectory_x = trajectory[:, 0] * (image_size_x/(bev_range*2)) + (image_size_x/2)
-            trajectory_y = trajectory[:, 1] * (image_size_y/(bev_range*2)) + (image_size_y/2)
-            ax.scatter(trajectory_y, (image_size_x - trajectory_x), color='blue')
+            trajectory_x = trajectory[1] * (image_size_x/(bev_range*2)) + (image_size_x/2)
+            trajectory_y = (-trajectory[0]) * (image_size_y/(bev_range*2)) + (image_size_y/2)
+            ax.scatter(trajectory_x, trajectory_y, color='blue') 
         
+        # print('pred_trajectories', pred_trajectories.shape)
+        # print('gt_trajectory', gt_trajectory.shape)
         for trajectory in gt_trajectory[0]:
             # Transform the trejectory to image space for plotting
-            trajectory_x = trajectory[:, 0] * (image_size_x/(bev_range*2)) + (image_size_x/2)
-            trajectory_y = trajectory[:, 1] * (image_size_y/(bev_range*2)) + (image_size_y/2)
-            ax.scatter(trajectory_y, (image_size_x - trajectory_x), color='red')
+            trajectory_x = trajectory[1] * (image_size_x/(bev_range*2)) + (image_size_x/2)
+            trajectory_y = (-trajectory[0]) * (image_size_y/(bev_range*2)) + (image_size_y/2)
+            ax.scatter(trajectory_x, trajectory_y, color='red')
         
         os.makedirs(f'plots/{dataset}', exist_ok=True)
         plt.savefig(f'plots/{dataset}/{i}.png')

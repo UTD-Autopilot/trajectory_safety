@@ -3,5 +3,4 @@ venv/
 saves/
 runs/
 plots/
-
-debug.png
+tmp/
