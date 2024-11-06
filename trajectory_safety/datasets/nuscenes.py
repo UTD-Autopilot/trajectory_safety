@@ -63,4 +63,4 @@ class NuScenesTrajectoryPredictionDataset(Dataset):
 
         img = torch.flip(img, [-1]) # flip x to fix handedness
         future_xy_local = rotate_points(future_xy_local, -90)
-        return img, agent_state_vector, future_xy_local
+        return img, agent_state_vector, future_xy_local, sample_token

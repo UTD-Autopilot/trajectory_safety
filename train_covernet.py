@@ -14,10 +14,10 @@ from trajectory_safety.datasets.utils import rotate_points
 from trajectory_safety.models.covernet.backbone import ResNetBackbone
 from trajectory_safety.models.covernet.covernet import CoverNet
 from trajectory_safety.loss.constant_lattice import ConstantLatticeLoss
+from trajectory_safety.loss.uncetrainty_map_value import UncertaintyValueLoss
 
 
-
-def train_model(dataset='carla', lattice_set='epsilon_4'):
+def train_model(dataset='carla', lattice_set='epsilon_4', uncertainty=False, uncertainty_aware_loss_weight=1.0, verbose=False):
     device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
 
     if dataset == 'nuscenes':
@@ -57,6 +57,7 @@ def train_model(dataset='carla', lattice_set='epsilon_4'):
     model.to(device)
 
     criterion = ConstantLatticeLoss(lattice=lattice)
+    uncertainty_aware_criterion = UncertaintyValueLoss('data/enn_A', lattice)
     #optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-5)
     # optimizer = torch.optim.Adam(model.parameters(), lr=0.1, weight_decay=0)
     #optimizer = torch.optim.RMSprop(model.parameters(), lr=0.1)
@@ -64,19 +65,26 @@ def train_model(dataset='carla', lattice_set='epsilon_4'):
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=10, min_lr=1e-5)
 
-    save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
+    if uncertainty:
+        save_dir = f'saves/{dataset}/resnet50_{lattice_set}_uncertainty/'
+        log_dir=f'./runs/{dataset}/resnet50_{lattice_set}_uncertainty/'
+    else:
+        save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
+        log_dir=f'./runs/{dataset}/resnet50_{lattice_set}/'
     os.makedirs(save_dir, exist_ok=True)
 
-    writer = SummaryWriter(log_dir=f'./runs/{dataset}/resnet50_{lattice_set}/')
+    writer = SummaryWriter(log_dir=log_dir)
 
     # Training loop
     num_epochs = 1000
     for epoch in range(0, num_epochs):
         model.train()
         train_loss = 0.0
+        train_classification_loss = 0.0
+        train_uncertainty_aware_loss = 0.0
         train_acc = 0.0
         for i, data in enumerate(train_loader):
-            image, state_vector, trajectory = data
+            image, state_vector, trajectory, sample_id = data
 
             image = image.to(device)
             state_vector = state_vector.to(device)
@@ -89,44 +97,73 @@ def train_model(dataset='carla', lattice_set='epsilon_4'):
             # print(f'state_vector min max: {state_vector.min()} {state_vector.max()}')
             # print(f'logits min max: {logits.min()} {logits.max()}')
 
-            loss, acc = criterion(logits, trajectory)
+            classification_loss, acc = criterion(logits, trajectory)
+            train_classification_loss += classification_loss.item()
             # print('loss', loss)
+
+            loss = classification_loss
+
+            if uncertainty:
+                uncertainty_aware_loss = uncertainty_aware_criterion(logits, sample_id) * uncertainty_aware_loss_weight
+                train_uncertainty_aware_loss += uncertainty_aware_loss.item()
+                loss += train_uncertainty_aware_loss
 
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item()
             train_acc += acc.item()
+
         train_loss = train_loss / len(train_loader)
+        train_classification_loss = train_classification_loss / len(train_loader)
+        train_uncertainty_aware_loss = train_uncertainty_aware_loss / len(train_loader)
         train_acc = train_acc / len(train_loader)
         writer.add_scalar('train_loss', train_loss, epoch)
+        writer.add_scalar('train_classification_loss', train_classification_loss, epoch)
+        writer.add_scalar('train_uncertainty_aware_loss', train_uncertainty_aware_loss, epoch)
         writer.add_scalar('train_acc', train_acc, epoch)
         lr = optimizer.param_groups[0]["lr"]
         writer.add_scalar('lr', lr, epoch)
-        print(f'Epoch {epoch} training loss: {train_loss} acc: {train_acc} lr: {lr}')
+        print(f'Epoch {epoch} training loss: {train_loss} (cls: {train_classification_loss} unc: {train_uncertainty_aware_loss}) acc: {train_acc} lr: {lr}')
 
         scheduler.step(train_loss)
 
         with torch.no_grad():
             test_loss = 0.0
+            test_classification_loss = 0.0
+            test_uncertainty_aware_loss = 0.0
             test_acc = 0.0
             for i, data in enumerate(test_loader):
-                image, state_vector, trajectory = data
+                image, state_vector, trajectory, sample_id = data
                 image = image.to(device)
                 state_vector = state_vector.to(device)
                 trajectory = trajectory.to(device)
                 logits = model(image, state_vector)
 
-                loss, acc = criterion(logits, trajectory)
+                classification_loss, acc = criterion(logits, trajectory)
+                test_classification_loss += classification_loss.item()
+
+                loss = classification_loss
+
+                uncertainty_aware_loss = uncertainty_aware_criterion(logits, sample_id) * uncertainty_aware_loss_weight
+                test_uncertainty_aware_loss += uncertainty_aware_loss.item()
+                if uncertainty:
+                    loss += test_uncertainty_aware_loss
+
                 test_loss += loss.item()
                 test_acc += acc.item()
+
             test_loss = test_loss / len(test_loader)
+            test_classification_loss = test_classification_loss / len(test_loader)
+            test_uncertainty_aware_loss = test_uncertainty_aware_loss / len(test_loader)
             test_acc = test_acc / len(test_loader)
             writer.add_scalar('test_loss', test_loss, epoch)
+            writer.add_scalar('test_classification_loss', test_classification_loss, epoch)
+            writer.add_scalar('test_uncertainty_aware_loss', test_uncertainty_aware_loss, epoch)
             writer.add_scalar('test_acc', test_acc, epoch)
-            print(f'Epoch {epoch} testing loss: {test_loss} acc: {test_acc}')
+            print(f'Epoch {epoch} testing loss: {test_loss} (cls: {test_classification_loss} unc: {test_uncertainty_aware_loss}) acc: {test_acc}')
 
-        if (epoch+1) % 2 == 0:
+        if (epoch+1) % 10 == 0:
             torch.save(model.state_dict(), os.path.join(save_dir, f'model_{epoch}.pth'))
             torch.save(optimizer.state_dict(), os.path.join(save_dir, f'optimizer_{epoch}.pth'))
 
@@ -137,14 +174,15 @@ def main():
     )
 
     parser.add_argument('-d', '--dataset', type=str, choices=['nuscenes', 'nuscenes_mini', 'carla'])
+    parser.add_argument('-u', '--uncertainty', default=False, action='store_true')
     parser.add_argument('-g', '--gpus', type=int, nargs='+', default=[0])
-    parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-v', '--verbose', default=False, action='store_true')
 
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(x) for x in args.gpus])
 
-    train_model(args.dataset)
+    train_model(args.dataset, uncertainty=args.uncertainty, verbose=args.verbose)
 
 if __name__ == "__main__":
     main()

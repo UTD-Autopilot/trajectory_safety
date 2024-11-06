@@ -28,7 +28,7 @@ class CarlaTrajectoryPredictionDataset(Dataset):
 
         for path in dataset_paths:
             self.read_data_folder(path)
-    
+
     def read_data_folder(self, path):
         local_records = []
         for agent in os.listdir(os.path.join(path, 'agents')):
@@ -69,7 +69,7 @@ class CarlaTrajectoryPredictionDataset(Dataset):
                         'bev_image_path': os.path.join(agent_folder, 'birds_view_semantic_camera', str(frame)+'.png'),
                         'output_path': os.path.join(agent_folder, 'pred_vehicle_trajectory', 'data.jsonl'),
                     })
-        
+
         records_to_delete = []
         for idx, record in enumerate(local_records):
             trajectory = []
@@ -82,12 +82,12 @@ class CarlaTrajectoryPredictionDataset(Dataset):
             record['trajectory'] = np.array(trajectory)
 
         local_records = [element for i,element in enumerate(local_records) if i not in records_to_delete]
-        
+
         self.records.extend(local_records)
-    
+
     def __len__(self):
         return len(self.records)
-    
+
     def __getitem__(self, index):
         record = self.records[index]
         agent_image = cv2.imread(record['bev_image_path'])
@@ -100,7 +100,7 @@ class CarlaTrajectoryPredictionDataset(Dataset):
         height = agent_image.shape[0]
         assert agent_image.shape[0] == agent_image.shape[1]
         img_scale =  agent_image.shape[0] / (self.bev_range*2)
-        
+
         image = agent_image
         # Rotate the image to standard rotation
         agent_pitch = record['agent_rotation'][2]
@@ -116,11 +116,10 @@ class CarlaTrajectoryPredictionDataset(Dataset):
         ], dtype=np.float32)
 
         image = cv2.warpAffine(src=image, M=translation_matrix, dsize=(width, height))
-        
+
         # print(translation[0], translation[1])
         # print(translation[0]*img_scale, translation[1]*img_scale)
 
-        
         # print(vehicle_pitch)
         mat = cv2.getRotationMatrix2D((width/2, height/2), vehicle_pitch, 1.0)
         image = cv2.warpAffine(src=image, M=mat, dsize=(width, height))
@@ -134,10 +133,12 @@ class CarlaTrajectoryPredictionDataset(Dataset):
         state_vector = torch.tensor(state_vector, dtype=torch.float32)
         y = np.array(y)
         y = (y-record['vehicle_location'])[:, [0, 1]] # take relative x and y coordinate
-        
+
         y = rotate_points(y, -vehicle_pitch)
         y = torch.tensor(y, dtype=torch.float32)
 
+        vehicle_id = record['vehicle_id']
+
         if self.return_metadata:
             return image, state_vector, y, self.records[index]
-        return image, state_vector, y
+        return image, state_vector, y, vehicle_id

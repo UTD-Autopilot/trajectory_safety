@@ -2,6 +2,7 @@ import os
 import torch
 import pickle
 import argparse
+import json
 
 import numpy as np
 from torch.utils.data import Dataset, DataLoader, random_split
@@ -14,7 +15,7 @@ from trajectory_safety.models.covernet.covernet import CoverNet
 from trajectory_safety.loss.constant_lattice import ConstantLatticeLoss
 
 
-def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4'):
+def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4', uncertainty=False):
     device = torch.device(f'cuda' if torch.cuda.is_available() else 'cpu')
 
     image_size_x = 224
@@ -43,7 +44,13 @@ def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4'):
     model = torch.nn.DataParallel(model)
     model.to(device)
 
-    save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
+    if uncertainty:
+        save_dir = f'saves/{dataset}/resnet50_{lattice_set}_uncertainty/'
+        output_path = f'plots/{dataset}/resnet50_{lattice_set}_uncertainty/'
+    else:
+        save_dir = f'saves/{dataset}/resnet50_{lattice_set}/'
+        output_path = f'plots/{dataset}/resnet50_{lattice_set}/'
+    
     latest_model_timestamp = None
     latest_model_path = None
     for filename in os.listdir(save_dir):
@@ -59,19 +66,23 @@ def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4'):
     except Exception as e:
         print(e)
 
-    
+    test_made = 0.0
+    test_min_distance = 0.0
     for i, data in enumerate(test_loader):
     
         figure, ax = plt.subplots(figsize=(10, 8))
         plt.title("Trajectory Prediction")
 
-        image, state_vector, gt_trajectory = data
+        image, state_vector, gt_trajectory, sample_id = data
 
         with torch.no_grad():
             logits = model(image, state_vector)
             _, predictions = torch.topk(logits, 1, 1)
             predictions = predictions.detach().cpu().numpy()[0]
         pred_trajectories = lattice[predictions]
+
+        distance = np.linalg.norm(gt_trajectory-pred_trajectories)
+        test_made += distance
 
         plt.imshow(np.moveaxis(image[0].cpu().numpy(), 0, 2))
 
@@ -93,9 +104,17 @@ def visualize_trajectory(dataset='nuscenes_mini', lattice_set='epsilon_4'):
                 trajectory_y += 62.5
             ax.scatter(trajectory_x, trajectory_y, color='blue') 
         
-        os.makedirs(f'plots/{dataset}', exist_ok=True)
-        plt.savefig(f'plots/{dataset}/{i}.png')
+        os.makedirs(output_path, exist_ok=True)
+        plt.savefig(os.path.join(output_path, f'{i}.png'))
         plt.close()
+
+    test_made = test_made / len(test_loader)
+    metrics = {
+        'test_made': test_made,
+        'test_min_distance': test_min_distance,
+    }
+    with open(os.path.join(output_path, '_metrics.json'), 'w') as f:
+        json.dump(metrics, f, indent=4)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -103,6 +122,7 @@ if __name__ == "__main__":
     )
 
     parser.add_argument('-d', '--dataset', type=str, choices=['nuscenes', 'nuscenes_mini', 'carla'])
+    parser.add_argument('-u', '--uncertainty', default=False, action='store_true')
     parser.add_argument('-g', '--gpus', type=int, nargs='+', default=[0])
     parser.add_argument('-v', '--verbose', action='store_true')
 
@@ -110,4 +130,4 @@ if __name__ == "__main__":
 
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join([str(x) for x in args.gpus])
 
-    visualize_trajectory(dataset=args.dataset)
+    visualize_trajectory(dataset=args.dataset, uncertainty=args.uncertainty)
